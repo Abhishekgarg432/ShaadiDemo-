@@ -1,0 +1,108 @@
+//
+//  ProfilesViewModel.swift
+//  ShaadiDemo
+//
+//  Created by Abhishek Garg on 9/26/25.
+//
+
+import Foundation
+import Combine
+import CoreData
+import Network
+import SwiftUI
+import UIKit
+
+enum DecisionStatus: String {
+    case none = "none"
+    case accepted = "accepted"
+    case declined = "declined"
+}
+
+@MainActor
+final class ProfilesViewModel: ObservableObject {
+    
+    @Published private(set) var profiles: [CDProfile] = []
+    @Published var errorMessage: String? = nil
+    @Published var isOnline: Bool = true
+    
+    
+    private let persistence: PersistenceController
+    private let service: NetworkService
+    private let monitor = NWPathMonitor()  // Network monitor (reachability)
+    private let queue = DispatchQueue(label: "NetMonitor")
+    
+    init(persistence: PersistenceController = .shared, service: NetworkService = NetworkService()) {
+        self.persistence = persistence
+        self.service = service
+        startNetworkMonitoring()
+        Task { await load() }
+    }
+    
+    func load() async {
+        do {
+            try refreshFromCache()
+        } catch {
+            errorMessage = "Failed to load cached data."
+        }
+        
+        if isOnline {
+            await refreshFromNetwork()
+        }
+    }
+    
+    func accept(id: String) {
+        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+        impactFeedback.impactOccurred()
+        
+        updateDecision(id: id, to: .accepted)
+    }
+    
+    func decline(id: String) {
+        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+        impactFeedback.impactOccurred()
+        
+        updateDecision(id: id, to: .declined)
+    }
+}
+
+private extension ProfilesViewModel {
+    
+    // Monitor network reachability to toggle offline banner and decide refresh behavior.
+    func startNetworkMonitoring() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in
+                self?.isOnline = (path.status == .satisfied)
+            }
+        }
+        monitor.start(queue: queue)
+    } 
+    
+    // Update decision in Core Data and re-publish.
+    func updateDecision(id: String, to status: DecisionStatus) {
+        do {
+            try persistence.setDecision(id: id, status: status)
+            try refreshFromCache()
+        } catch {
+            errorMessage = "Failed to save your decision. Try again."
+        }
+    }
+}
+
+//MARK: load Data
+private extension ProfilesViewModel {
+    
+    func refreshFromCache() throws {
+        profiles = try persistence.fetchAllProfiles()
+    }
+    
+    func refreshFromNetwork() async {
+        do {
+            let items = try await service.fetchProfiles(count: 10)
+            
+            try persistence.upsertProfiles(items)
+            try refreshFromCache()
+        } catch {
+            errorMessage = "Couldn't refresh from server. Working offline."
+        }
+    }
+}
