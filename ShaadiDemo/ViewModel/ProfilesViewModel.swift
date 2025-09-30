@@ -30,20 +30,30 @@ final class ProfilesViewModel: ObservableObject {
     private let service: NetworkService
     private let monitor = NWPathMonitor()  // Network monitor (reachability)
     private let queue = DispatchQueue(label: "NetMonitor")
+    private var currentTask: Task<Void, Never>?
     
     init(persistence: PersistenceController = .shared, service: NetworkService = NetworkService()) {
         self.persistence = persistence
         self.service = service
         startNetworkMonitoring()
-        Task { await load() }
+        currentTask = Task { await load() }
+    }
+    
+    deinit {
+        monitor.cancel()
+        currentTask?.cancel()
     }
     
     func load() async {
+        guard !Task.isCancelled else { return }
+        
         do {
             try refreshFromCache()
         } catch {
             errorMessage = "Failed to load cached data."
         }
+        
+        guard !Task.isCancelled else { return }
         
         if isOnline {
             await refreshFromNetwork()
@@ -63,6 +73,11 @@ final class ProfilesViewModel: ObservableObject {
         
         updateDecision(id: id, to: .declined)
     }
+    
+    func refresh() {
+        currentTask?.cancel()
+        currentTask = Task { await load() }
+    }
 }
 
 private extension ProfilesViewModel {
@@ -79,6 +94,8 @@ private extension ProfilesViewModel {
     
     // Update decision in Core Data and re-publish.
     func updateDecision(id: String, to status: DecisionStatus) {
+        guard !Task.isCancelled else { return }
+        
         do {
             try persistence.setDecision(id: id, status: status)
             try refreshFromCache()
@@ -96,13 +113,19 @@ private extension ProfilesViewModel {
     }
     
     func refreshFromNetwork() async {
+        guard !Task.isCancelled else { return }
+        
         do {
             let items = try await service.fetchProfiles(count: 10)
+            
+            guard !Task.isCancelled else { return }
             
             try persistence.upsertProfiles(items)
             try refreshFromCache()
         } catch {
-            errorMessage = "Couldn't refresh from server. Working offline."
+            if !Task.isCancelled {
+                errorMessage = "Couldn't refresh from server. Working offline."
+            }
         }
     }
 }

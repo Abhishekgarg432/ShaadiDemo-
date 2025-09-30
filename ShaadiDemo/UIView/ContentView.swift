@@ -53,9 +53,7 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
-                        Task {
-                            await vm.load()
-                        }
+                        vm.refresh()
                     }) {
                         Image(systemName: "arrow.clockwise")
                             .font(AppTypography.callout)
