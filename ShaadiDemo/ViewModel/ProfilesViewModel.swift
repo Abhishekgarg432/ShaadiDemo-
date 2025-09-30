@@ -45,7 +45,9 @@ final class ProfilesViewModel: ObservableObject {
     }
     
     func load() async {
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            return
+        }
         
         do {
             try refreshFromCache()
@@ -56,7 +58,10 @@ final class ProfilesViewModel: ObservableObject {
         guard !Task.isCancelled else { return }
         
         if isOnline {
+            print("[ViewModel] Online - attempting network refresh...")
             await refreshFromNetwork()
+        } else {
+            print("[ViewModel] Offline - skipping network refresh")
         }
     }
     
@@ -113,15 +118,22 @@ private extension ProfilesViewModel {
     }
     
     func refreshFromNetwork() async {
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { 
+            return
+        }
         
         do {
             let items = try await service.fetchProfiles(count: 10)
+            print("✅ [ViewModel] NetworkService returned \(items.count) profiles")
             
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { 
+                return
+            }
             
             try persistence.upsertProfiles(items)
+            
             try refreshFromCache()
+            
         } catch {
             if !Task.isCancelled {
                 errorMessage = "Couldn't refresh from server. Working offline."

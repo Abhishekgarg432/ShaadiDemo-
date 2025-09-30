@@ -22,24 +22,41 @@ struct NetworkService {
     }
     
     func fetchProfiles(count: Int) async throws -> [NetworkProfile] {
-        var comps = URLComponents(string: "https://randomuser.me/api/")!
+        let urlString = "https://randomuser.me/api/"
+        print("[API] Starting fetch request for \(count) profiles from: \(urlString)")
+        
+        var comps = URLComponents(string: urlString)!
         let query: [URLQueryItem] = [URLQueryItem(name: "results", value: String(count))]
         comps.queryItems = query
         
+        guard let finalURL = comps.url else {
+            print("[API] Failed to construct URL")
+            throw NetworkError.emptyData
+        }
+        
+        print("[API] Final URL: \(finalURL.absoluteString)")
+        
         var lastError: Error?
         for attempt in 1...3 {
+            print("[API] Attempt \(attempt)/3")
+            
             do {
                 // Actual HTTP call
-                let (data, response) = try await session.data(from: comps.url!)
+                let (data, response) = try await session.data(from: finalURL)
                 
-                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                    throw NetworkError.badStatus(http.statusCode)
+                if let http = response as? HTTPURLResponse {
+                    print("✅ [API] HTTP Status Code: \(http.statusCode)")
+                    if !(200...299).contains(http.statusCode) {
+                        print("[API] Bad HTTP status: \(http.statusCode)")
+                        throw NetworkError.badStatus(http.statusCode)
+                    }
                 }
-                
+                                
                 let decoded: RUResponse = try JSONDecoder().decode(RUResponse.self, from: data)
+                print("✅ [API] JSON decoding successful, received \(decoded.results.count) profiles")
                 
                 // Map DTO (Data Transfer Object) -> domain
-                return decoded.results.map { u in
+                let profiles = decoded.results.map { u in
                     NetworkProfile(
                         id: u.login.uuid,
                         fullName: "\(u.name.first) \(u.name.last)",
@@ -48,6 +65,10 @@ struct NetworkService {
                         imageURL: URL(string: u.picture.large)!
                     )
                 }
+                
+                print("✅ [API] Successfully fetched \(profiles.count) profiles")
+                return profiles
+                
             } catch {
                 let classified: Error
                 if error is DecodingError {
@@ -61,7 +82,8 @@ struct NetworkService {
                 lastError = classified
                 
                 if attempt < 3 {
-                    try? await Task.sleep(nanoseconds: UInt64(300_000_000 * attempt)) // 0.3s, 0.6s
+                    let delay = UInt64(300_000_000 * attempt) // 0.3s, 0.6s
+                    try? await Task.sleep(nanoseconds: delay)
                     continue
                 } else {
                     throw classified
